@@ -1,4 +1,5 @@
 #![feature(conservative_impl_trait)]
+#![feature(rustc_encodable_decodable)]
 
 #[macro_use]
 extern crate lazy_static;
