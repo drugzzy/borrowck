@@ -7,8 +7,8 @@ lazy_static! {
 
 macro_rules! log {
     ($($t:tt)*) => {
-        if *::log::DEBUG_ENABLED {
+        // if *::log::DEBUG_ENABLED {
             println!($($t)*)
-        }
+        // }
     }
 }

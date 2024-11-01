@@ -113,8 +113,8 @@ pub struct StructName {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub enum Ty {
-    Ref(Region, BorrowKind, Box<Ty>),
+pub enum  Ty {
+    Ref(Region, BorrowKind, Box<Ty>), // 借用类型，Region表示CFG上的点，BorrowKind表示借用类型，Box<Ty>表示被借用的类型
     Unit,
     Struct(StructName, Vec<TyParameter>),
     Bound(usize),
@@ -254,7 +254,7 @@ pub enum ActionKind {
     /// scope. This is not counted as a use nor a drop; it basically
     /// just pops the stack space. It *is*, however, important to the
     /// borrow checker.
-    StorageDead(Variable),
+    StorageDead(Variable), // ScopeEnd
 
     /// A synthetic action that is inserted into the basic blocks
     /// representing the end of a skolemized region. There is no
@@ -390,6 +390,7 @@ pub enum PointName {
     SkolemizedEnd(RegionName),
 }
 
+// 生命周期变量名，而不是变量名
 #[derive(Copy, Clone, Debug, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub struct RegionName {
     name: InternedString

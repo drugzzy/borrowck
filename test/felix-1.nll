@@ -13,7 +13,7 @@ let bar: Foo;
 let p: &'p Foo;
 
 block START {
-    p = &'foo foo;
+    p = &'foo1 foo;
     goto B C;
 }
 
@@ -28,10 +28,10 @@ block C {
     use(p);
 }
 
-assert B/1 not in 'foo;
-assert C/0 in 'foo;
+assert B/1 not in 'foo1;
+assert C/0 in 'foo1;
 assert C/0 in 'bar;
-assert C/1 not in 'foo;
+assert C/1 not in 'foo1;
 assert C/1 not in 'bar;
 
 assert p not live at START;

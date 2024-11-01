@@ -59,8 +59,10 @@ fn process_input(args: &Args, input: &str) -> Result<(), Box<Error>> {
         return try!(Err(String::from("not UTF-8")));
     }
     let func = try!(Func::parse(&file_text));
+    // 根据函数构建控制流图
     let graph = FuncGraph::new(func);
     graph::with_graph(&graph, || {
+        // 初始化环境上下文，包括计算可达性、计算支配节点、收集变量信息等
         let env = Environment::new(&graph);
 
         if args.flag_dominators {
@@ -68,6 +70,7 @@ fn process_input(args: &Args, input: &str) -> Result<(), Box<Error>> {
         }
 
         println!("Testing `{}`...", input);
+        // 调用检查函数
         try!(regionck::region_check(&env));
         Ok(())
     })
