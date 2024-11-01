@@ -28,6 +28,8 @@ impl<'cx> LoansInScope<'cx> {
 
         // Collect the full set of loans; these are just the set of
         // `&foo` expressions.
+        // 遍历所有语句，找到所有的Borrow语句，然后创建相应的Loan
+        // 这里其实只是收集一下这些loan，真正用于不动点迭代的时loans_in_scope_after_block
         let loans: Vec<_> = env.reverse_post_order
             .iter()
             .flat_map(|&block| {
@@ -42,6 +44,7 @@ impl<'cx> LoansInScope<'cx> {
                                 block,
                                 action: index,
                             };
+                            // 根据region name拿到对应的region
                             let region = regionck.region(region);
                             Some(Loan {
                                 point,
@@ -56,10 +59,11 @@ impl<'cx> LoansInScope<'cx> {
             })
             .collect();
 
-        log!("loans: {:#?}", loans);
+        println!("loans: {:#?}", loans);
 
         // Make a convenient hash map for getting the index of a loan
         // based on where it appears.
+        // 创建Point到Loan的映射关系，方便计算
         let loans_by_point: HashMap<_, _> = loans
             .iter()
             .enumerate()
@@ -78,6 +82,7 @@ impl<'cx> LoansInScope<'cx> {
             loans_by_point,
             loans_in_scope_after_block,
         };
+        // 不动点迭代
         this.compute();
 
         this
@@ -155,15 +160,19 @@ impl<'cx> LoansInScope<'cx> {
             }
 
             // callback at start of the action
+            // 这是最后report errors阶段根据loans来报错的
+            // buf中存的是当前遍历到的语句开始时的loans信息
             callback(point, Some(action), buf.as_slice());
 
             // bring the loan into scope after the borrow
+            // 把当前语句创建的loans加到buf里，MIR上可以保证每条语句最多只有一个loan
             if let Some(&loan_index) = self.loans_by_point.get(&point) {
                 buf.set(loan_index);
             }
 
             // figure out which path is overwritten by this action;
             // this may cancel out some loans
+            // 如果当前语句会kill掉一些loans，则将其kill掉，就是发生write的时候
             if let Some(overwritten_path) = action.overwrites() {
                 for loan_index in self.loans_killed_by_write_to(&overwritten_path) {
                     buf.kill(loan_index);
@@ -172,6 +181,7 @@ impl<'cx> LoansInScope<'cx> {
         }
 
         // final callback for the terminator
+        // 对terminator的特殊处理
         let point = self.env.end_point(block);
         for loan_index in self.loans_not_in_scope_at(point) {
             buf.kill(loan_index);

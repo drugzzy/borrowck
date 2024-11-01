@@ -78,6 +78,7 @@ impl<'func> Environment<'func> {
         }
     }
 
+    // 拿到block的最后一条语句
     pub fn end_point(&self, block: BasicBlockIndex) -> Point {
         let actions = self.graph.block_data(block).actions().len();
         Point {
@@ -87,6 +88,7 @@ impl<'func> Environment<'func> {
     }
 
     pub fn successor_points(&self, p: Point) -> Vec<Point> {
+        // 当前block的最后一条语句
         let end_point = self.end_point(p.block);
         if p != end_point {
             vec![

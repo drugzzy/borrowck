@@ -29,6 +29,7 @@ pub enum BitKind {
 
 impl<'env> Liveness<'env> {
     pub fn new(env: &'env Environment<'env>) -> Liveness {
+        // 收集所有decls还有free region，放到这个Vec里
         let bits: Vec<_> = {
             let used_bits = env.graph
                 .decls()
@@ -46,6 +47,7 @@ impl<'env> Liveness<'env> {
             used_bits.chain(drop_bits).chain(free_region_bits).collect()
         };
 
+        // 建立bits中元素与下标的映射
         let bits_map: HashMap<_, _> = bits.iter()
             .cloned()
             .enumerate()
@@ -73,6 +75,7 @@ impl<'env> Liveness<'env> {
         set.contains(&region_name)
     }
 
+    // 根据liveness信息，返回对应的RegionName集合的迭代器
     pub fn live_regions<'a>(
         &'a self,
         live_bits: BitSlice<'a>,
@@ -80,6 +83,7 @@ impl<'env> Liveness<'env> {
         self.regions_set(live_bits).into_iter()
     }
 
+    // 根据liveness信息，返回对应的RegionName集合
     fn regions_set(&self, live_bits: BitSlice) -> BTreeSet<repr::RegionName> {
         let mut set = BTreeSet::new();
         for (index, &bk) in self.bits.iter().enumerate() {
@@ -137,14 +141,18 @@ impl<'env> Liveness<'env> {
         buf.clear();
 
         // everything live in a successor is live at the exit of the block
+        // 先做merge
         for succ in self.env.graph.successors(block) {
             buf.set_from(self.liveness.bits(succ));
         }
 
         // callback for the "goto" point
+        // goto就是每个BB的最后一条语句，没有任何的Action，所以第二个参数是None
+        // 感觉是因为用了Option，所以才在这里特殊处理一下
         callback(self.env.end_point(block), None, buf.as_slice());
 
         // walk backwards through the actions
+        // 反向遍历当前BB中的所有语句
         for (index, action) in self.env
             .graph
             .block_data(block)
@@ -153,19 +161,23 @@ impl<'env> Liveness<'env> {
             .enumerate()
             .rev()
         {
+            // 当前语句的def-use信息
             let (def_var, use_var) = action.def_use();
 
+            // 对于write，则kill
             // anything we write to is no longer live
             for v in def_var {
                 buf.kill(self.bits_map[&BitKind::VariableUsed(v)]);
                 buf.kill(self.bits_map[&BitKind::VariableDrop(v)]);
             }
 
+            // 对于read，则是live
             // any variables we read from, we make live
             for v in use_var {
                 buf.set(self.bits_map[&BitKind::VariableUsed(v)]);
             }
 
+            // 特殊处理
             // some actions are special
             match action.kind {
                 repr::ActionKind::Drop(ref path) => {
@@ -181,10 +193,12 @@ impl<'env> Liveness<'env> {
                 block,
                 action: index,
             };
+            // 每条语句都会回调一次，这样就保证对每条语句都做了处理
             callback(point, Some(action), buf.as_slice());
         }
     }
 
+    // 一个类型里可能有好多region，这里需要都标为使用
     fn use_ty(&self, buf: &mut BTreeSet<repr::RegionName>, ty: &repr::Ty) {
         for region_name in ty.walk_regions().map(|r| r.assert_free()) {
             self.use_region(buf, region_name);
@@ -262,6 +276,7 @@ impl DefUse for repr::Action {
 
             // drop is special; it is not considered a "full use" of
             // the variable that is being dropped
+            // drop和storagedead不被看作任何的def或use
             repr::ActionKind::Drop(..) => (vec![], vec![]),
 
             repr::ActionKind::Noop => (vec![], vec![]),

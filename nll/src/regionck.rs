@@ -37,10 +37,12 @@ impl<'env> RegionCheck<'env> {
         self.infer.region(var)
     }
 
+    // borrowck的核心函数
     fn check(&mut self) -> Result<(), Box<Error>> {
         let mut errors = ErrorReporting::new();
 
         // Register expected errors.
+        // 这里应该是为了验证测试用例而写的，实际没啥用
         for &block in &self.env.reverse_post_order {
             let actions = self.env.graph.block_data(block).actions();
             for (index, action) in actions.iter().enumerate() {
@@ -52,12 +54,16 @@ impl<'env> RegionCheck<'env> {
         }
 
         // Compute liveness.
+        // 计算liveness
         let liveness = &Liveness::new(self.env);
 
         // Add inference constraints.
+        // 根据上面算的liveness，添加约束，还有subtyping约束和reborrow约束
         self.populate_inference(liveness);
 
+        // 约束求解，迭代到不动点
         // Solve inference constraints, reporting any errors.
+        // 有可能要在约束求解的过程中报错？主要是capped场景
         for error in self.infer.solve(self.env) {
             errors.report_error(error.constraint_point,
                                 format!("capped variable `{}` exceeded its limits",
@@ -178,6 +184,7 @@ impl<'env> RegionCheck<'env> {
         Ok(())
     }
 
+    // 还不懂，目测是对named lifetimes做的
     fn populate_outlives(
         &mut self,
         rv: RegionVariable,
@@ -208,6 +215,7 @@ impl<'env> RegionCheck<'env> {
         }
     }
 
+    // 添加约束
     fn populate_inference(&mut self, liveness: &Liveness) {
         // This is sort of a hack, but... for each "free region" `r`,
         // we will wind up with a region variable. We want that region
@@ -220,27 +228,34 @@ impl<'env> RegionCheck<'env> {
         // constraint we would need to add, and inference right now
         // doesn't permit such constraints -- you could also view it
         // an assertion that we add to the tests).
+        // 这里应该是先处理free region
         for region_decl in self.env.graph.free_regions() {
             let &RegionDecl{ name: region, ref outlives } = region_decl;
             let rv = self.region_variable(region);
             for &block in &self.env.reverse_post_order {
                 let end_point = self.env.end_point(block);
+                // cfg的每个节点都是free region活着的地方
                 for action in 0 .. end_point.action {
                     self.infer.add_live_point(rv, Point { block, action });
                 }
                 self.infer.add_live_point(rv, end_point);
             }
 
+            // 加上end('r)这种位置
             let skolemized_block = self.env.graph.skolemized_end(region);
             self.infer.add_live_point(rv, Point { block: skolemized_block, action: 0 });
+            // 这里还没看懂
             self.populate_outlives(rv, &mut vec![region], outlives);
             self.infer.cap_var(rv);
             log!("Region for {:?}:\n{:#?}\n", region, self.infer.region(rv));
         }
 
+        // 在这里遍历一遍是为了一次性添加liveness约束、subtyping约束和reborrow约束
         liveness.walk(|point, action, live_on_entry| {
             // To start, find every variable `x` that is live. All regions
             // in the type of `x` must include `point`.
+            // liveness用的是在每个point的infact
+            // 这里是真正根据liveness来添加liveness约束的地方
             for region_name in liveness.live_regions(live_on_entry) {
                 let rv = self.region_variable(region_name);
                 self.infer.add_live_point(rv, point);
@@ -254,6 +269,9 @@ impl<'env> RegionCheck<'env> {
 
             // Next, walk the actions and establish any additional constraints
             // that may arise from subtyping.
+            // subtyping和reborrow都是在后继生效，所以需要这个
+            // 如果是terminator怎么办？
+            // 有可能没影响，因为这个变量只会用在subtyping和reborrow中，而这俩情况不可能是terminator
             let successor_point = Point {
                 block: point.block,
                 action: point.action + 1,
@@ -267,27 +285,38 @@ impl<'env> RegionCheck<'env> {
                     borrow_kind,
                     ref source_path,
                 ) => {
+                    // p的类型
                     let dest_ty = self.env.path_ty(dest_path);
                     let source_ty = self.env.path_ty(source_path);
+                    // RHS的类型，这个场景下RHS一定是一个引用类型
                     let ref_ty = Box::new(repr::Ty::Ref(
                         repr::Region::Free(region_name),
                         borrow_kind,
                         source_ty,
                     ));
+                    // dest_ty是ref_ty的subtype，即ref_ty: dest_ty @ P
+                    // 感觉这里传Co，然后把dest_ty和ref_ty换一下位置也没问题，跑了测试套试了一下，用例还是都通过的
+                    // self.relate_tys(successor_point, repr::Variance::Co, &ref_ty, &dest_ty);
                     self.relate_tys(successor_point, repr::Variance::Contra, &dest_ty, &ref_ty);
+                    // 添加可能存在的reborrow约束
                     self.ensure_borrow_source(successor_point, region_name, source_path);
                 }
 
                 // a = b
+                // 这里不用处理reborrow，因为b一定是个lvalue，reborrow只会在上面那个case中处理
+                // assign这个场景包含两个引用类型之间assign，也包含结构体之间的assign，且结构体有引用类型的成员
                 repr::ActionKind::Assign(ref a, ref b) => {
+                    // 拿到path的类型，好像没什么特别的
                     let a_ty = self.env.path_ty(a);
                     let b_ty = self.env.path_ty(b);
 
                     // `b` must be a subtype of `a` to be assignable:
+                    // b要比a活得长，协变，b: a @ P
                     self.relate_tys(successor_point, repr::Variance::Co, &b_ty, &a_ty);
                 }
 
                 // 'X: 'Y
+                // 应该是where约束
                 repr::ActionKind::Constraint(ref c) => {
                     match **c {
                         repr::Constraint::Outlives(c) => {
@@ -301,6 +330,9 @@ impl<'env> RegionCheck<'env> {
                     }
                 }
 
+                // 这些都不用处理
+                // 为什么Init不用处理，感觉Init跟Assign的区别不大，还不懂
+                // 对于函数调用返回借用的情况，不知道是怎么处理的，感觉是需要处理的，但这里简化了
                 repr::ActionKind::Init(..) |
                 repr::ActionKind::Use(..) |
                 repr::ActionKind::Drop(..) |
@@ -332,6 +364,7 @@ impl<'env> RegionCheck<'env> {
         }
     }
 
+    // 看着没啥用，好像是assert判断时候用的
     fn to_region(&self, user_region: &repr::RegionLiteral) -> Region {
         let mut region = Region::new();
         for p in &user_region.points {
@@ -340,6 +373,7 @@ impl<'env> RegionCheck<'env> {
         region
     }
 
+    // 应该是解析subtyping的关系创建对应的约束
     fn relate_tys(
         &mut self,
         successor_point: Point,
@@ -355,18 +389,26 @@ impl<'env> RegionCheck<'env> {
             successor_point
         );
         match (a, b) {
+            // 两个引用类型之间赋值，比如p = q，还有p = &mut local
             (&repr::Ty::Ref(r_a, bk_a, ref t_a), &repr::Ty::Ref(r_b, bk_b, ref t_b)) => {
                 assert_eq!(bk_a, bk_b, "cannot relate {:?} and {:?}", a, b);
+                // 创建当前层级的region之间的约束
                 self.relate_regions(
                     successor_point,
-                    variance.invert(),
+                    variance.invert(), // 要倒置一下，感觉是a和b参数顺序导致的
                     r_a.assert_free(),
                     r_b.assert_free(),
                 );
+                // 递归里面的子类型，即被借用的类型
+                // 对毕昇C，就不需要了，因为没有对借用取借用
+                // 先拿到被借用的类型的variance
                 let referent_variance = variance.xform(bk_a.variance());
+                // t_a和t_b就是被借用的类型，因此要递归进去
                 self.relate_tys(successor_point, referent_variance, t_a, t_b);
             }
             (&repr::Ty::Unit, &repr::Ty::Unit) => {}
+            // p = q，但p和q都是struct类型，应该是这样
+            // 这里还没看是怎么做的
             (&repr::Ty::Struct(s_a, ref ps_a), &repr::Ty::Struct(s_b, ref ps_b)) => {
                 if s_a != s_b {
                     panic!("cannot compare `{:?}` and `{:?}`", s_a, s_b);
@@ -418,6 +460,7 @@ impl<'env> RegionCheck<'env> {
                 // "a Contra b" == "a >= b"
                 self.infer.add_outlives(r_a, r_b, successor_point),
             Variance::In => {
+                // 对于invariance，需要加两条约束
                 self.infer.add_outlives(r_a, r_b, successor_point);
                 self.infer.add_outlives(r_b, r_a, successor_point);
             }
@@ -451,6 +494,8 @@ impl<'env> RegionCheck<'env> {
     /// that reborrows live long enough. Specifically, if we borrow
     /// something like `*r` for `'a`, where `r: &'b i32`, then `'b:
     /// 'a` is required.
+    /// 这看着像处理reborrow，好像还真是，下面有supporting prefixes
+    /// &'a *lv，lv的生命周期为'b，则'b : 'a @ P
     fn ensure_borrow_source(
         &mut self,
         successor_point: Point,
@@ -477,6 +522,8 @@ impl<'env> RegionCheck<'env> {
                     let ty = self.env.path_ty(base_path);
                     log!("ensure_borrow_source: ty={:?}", ty);
                     match *ty {
+                        // 这里还不太懂，虽然知道是对*b生成reborrow约束
+                        // 这里不用递归是因为for循环里处理了所有supporting prefixes，所以没必要递归
                         repr::Ty::Ref(ref_region, _, _) => {
                             assert_eq!(field_name, repr::FieldName::star());
                             let ref_region_name = ref_region.assert_free();

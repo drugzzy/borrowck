@@ -6,16 +6,16 @@ use super::{Graph, NodeIndex};
 type Word = u32;
 
 pub struct BitSet<G: Graph> {
-    bits_per_node: usize,
-    words: Vec<Word>,
+    bits_per_node: usize, // 每个节点需要多少个bit
+    words: Vec<Word>, // 存储所有节点的状态
     graph: PhantomData<G>,
 }
 
 impl<G: Graph> BitSet<G> {
     pub fn new(graph: &G, bits_per_node: usize) -> Self {
         let num_nodes = graph.num_nodes();
-        let words_per_node = words(bits_per_node);
-        let words = vec![0; words_per_node * num_nodes];
+        let words_per_node = words(bits_per_node); // 算出来这么多bit需要多少个word
+        let words = vec![0; words_per_node * num_nodes]; // 所有的节点的状态都存在这个words中
         BitSet {
             bits_per_node: bits_per_node,
             words: words,
@@ -152,6 +152,7 @@ fn words(x: usize) -> usize {
 }
 
 #[inline]
+// 实际上就是按位更新，没什么特别的，用succ的in去更新当前的BB的out
 fn set_from(words: &mut [Word], bits: BitSlice) -> bool {
     let mut changed = false;
     for (out_word, in_word) in words.iter_mut().zip(bits.words) {

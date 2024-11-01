@@ -112,6 +112,7 @@ Action: Action = {
     },
 };
 
+// 简化版的rust语法，建立了语句到ActionKind的映射关系
 ActionKind: ActionKind = {
     <a:Path> "=" "use" "(" <p:Comma<Path>> ")" ";" => ActionKind::Init(a, p),
     <Path> "=" "&" <RegionName> <BorrowKind> <Path> ";" => ActionKind::Borrow(<>),

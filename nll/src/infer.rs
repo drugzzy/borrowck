@@ -99,13 +99,15 @@ impl InferenceContext {
         &self.definitions[v.index].value
     }
 
+    // 求解完成后，应该是在definitions里面存好了每个RegionName的NLL
     pub fn solve(&mut self, env: &Environment) -> Vec<InferenceError> {
         let mut changed = true;
         let mut dfs = Dfs::new(env);
         while changed {
             changed = false;
             for constraint in &self.constraints {
-                let sub = &self.definitions[constraint.sub.index].value.clone();
+                // 拿sub更新sup
+                let sub: &Region = &self.definitions[constraint.sub.index].value.clone();
                 let sup_def = &mut self.definitions[constraint.sup.index];
                 log!("constraint: {:?}", constraint);
                 log!("    sub (before): {:?}", sub);
@@ -114,6 +116,7 @@ impl InferenceContext {
                 if dfs.copy(sub, &mut sup_def.value, constraint.point) {
                     changed = true;
 
+                    // 没懂这是什么情况下要报错
                     if sup_def.capped {
                         // This is kind of a hack, but when we add a
                         // constraint, the "point" is always the point

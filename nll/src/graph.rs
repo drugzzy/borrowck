@@ -7,6 +7,7 @@ use std::mem;
 use std::iter;
 use std::slice;
 
+// 函数对应的控制流图
 pub struct FuncGraph {
     func: repr::Func,
     start_block: BasicBlockIndex,

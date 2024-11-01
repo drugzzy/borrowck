@@ -9,6 +9,7 @@ pub fn borrow_check(env: &Environment,
                     loans_in_scope: &LoansInScope,
                     errors: &mut ErrorReporting) {
     loans_in_scope.walk(env, |point, opt_action, loans| {
+        // 根据每个point的loans信息，并根据当前语句的类型，进行检查
         let borrowck = BorrowCheck { env, point, loans };
         if let Some(action) = opt_action {
             if let Err(e) = borrowck.check_action(action) {
